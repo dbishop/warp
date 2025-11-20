@@ -1,5 +1,6 @@
 /*
  * Warp (C) 2019-2020 MinIO, Inc.
+ * Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -93,15 +94,26 @@ func MergeObjectPrefixes(o []Objects) []string {
 	return res
 }
 
-func (o *Object) setPrefix(opts Options) {
+// setPrefix sets the prefix based on options and object counter.
+// The counter parameter is used to select from multiple prefixes in round-robin fashion.
+// randomSuffix is the per-thread random suffix (generated once, reused for all objects).
+func (o *Object) setPrefix(opts Options, counter uint64, randomSuffix string) {
+	var customPrefix string
+	if len(opts.customPrefixes) > 0 {
+		// Round-robin selection from the list of custom prefixes
+		customPrefix = opts.customPrefixes[counter%uint64(len(opts.customPrefixes))]
+	}
+
 	if opts.randomPrefix <= 0 {
-		o.Prefix = opts.customPrefix
+		o.Prefix = customPrefix
 		return
 	}
-	b := make([]byte, opts.randomPrefix)
-	rng := rand.New(rand.NewSource(int64(rand.Uint64())))
-	randASCIIBytes(b, rng)
-	o.Prefix = path.Join(opts.customPrefix, string(b))
+	// Use the provided random suffix (per-thread) instead of generating a new one
+	if customPrefix == "" {
+		o.Prefix = randomSuffix
+	} else {
+		o.Prefix = path.Join(customPrefix, randomSuffix)
+	}
 }
 
 func (o *Object) setName(s string) {

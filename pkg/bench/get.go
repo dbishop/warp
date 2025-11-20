@@ -35,8 +35,8 @@ type Get struct {
 	Common
 
 	// Default Get options.
-	GetOpts    minio.GetObjectOptions
-	ListPrefix string
+	GetOpts      minio.GetObjectOptions
+	ListPrefixes []string
 
 	objects       generator.Objects
 	CreateObjects int
@@ -63,50 +63,67 @@ func (g *Get) Prepare(ctx context.Context) error {
 			return (fmt.Errorf("bucket %s does not exist and --list-existing has been set", g.Bucket))
 		}
 
-		// list all objects
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		objectCh := cl.ListObjects(ctx, g.Bucket, minio.ListObjectsOptions{
-			WithVersions: g.Versions > 1,
-			Prefix:       g.ListPrefix,
-			Recursive:    !g.ListFlat,
-		})
-
 		versions := map[string]int{}
 
-		for object := range objectCh {
-			if object.Err != nil {
-				return object.Err
-			}
-			if object.Size == 0 {
-				continue
-			}
-			obj := generator.Object{
-				Name: object.Key,
-				Size: object.Size,
-			}
+		// If no prefixes specified, list all objects (empty prefix)
+		prefixes := g.ListPrefixes
+		if len(prefixes) == 0 {
+			prefixes = []string{""}
+		}
 
-			if g.Versions > 1 {
-				if object.VersionID == "" {
+		// List objects from all specified prefixes
+		for _, prefix := range prefixes {
+			ctx, cancel := context.WithCancel(ctx)
+			objectCh := cl.ListObjects(ctx, g.Bucket, minio.ListObjectsOptions{
+				WithVersions: g.Versions > 1,
+				Prefix:       prefix,
+				Recursive:    !g.ListFlat,
+			})
+
+			for object := range objectCh {
+				if object.Err != nil {
+					cancel()
+					done()
+					return object.Err
+				}
+				if object.Size == 0 {
 					continue
 				}
+				obj := generator.Object{
+					Name: object.Key,
+					Size: object.Size,
+				}
 
-				if version, found := versions[object.Key]; found {
-					if version >= g.Versions {
+				if g.Versions > 1 {
+					if object.VersionID == "" {
 						continue
 					}
+
+					if version, found := versions[object.Key]; found {
+						if version >= g.Versions {
+							continue
+						}
+					}
+					versions[object.Key]++
+					obj.VersionID = object.VersionID
 				}
-				versions[object.Key]++
-				obj.VersionID = object.VersionID
+
+				g.objects = append(g.objects, obj)
+
+				// limit to ListingMaxObjects
+				if g.CreateObjects > 0 && len(g.objects) >= g.CreateObjects {
+					cancel()
+					break
+				}
 			}
+			cancel()
 
-			g.objects = append(g.objects, obj)
-
-			// limit to ListingMaxObjects
+			// Stop if we've reached the object limit
 			if g.CreateObjects > 0 && len(g.objects) >= g.CreateObjects {
 				break
 			}
 		}
+
 		if len(g.objects) == 0 {
 			return (fmt.Errorf("no objects found for bucket %s", g.Bucket))
 		}

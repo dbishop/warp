@@ -77,11 +77,12 @@ func randomOptsDefaults() RandomOpts {
 }
 
 type randomSrc struct {
-	source  *rng.Reader
-	rng     *rand.Rand
-	obj     Object
-	o       Options
-	counter atomic.Uint64
+	source       *rng.Reader
+	rng          *rand.Rand
+	obj          Object
+	o            Options
+	counter      atomic.Uint64
+	randomSuffix string // Per-thread random suffix (generated once, reused for all objects)
 }
 
 func newRandom(o Options) (Source, error) {
@@ -113,7 +114,20 @@ func newRandom(o Options) (Source, error) {
 			Size:        0,
 		},
 	}
-	r.obj.setPrefix(o)
+
+	// Generate random suffix once per thread (if randomPrefix > 0)
+	// This preserves the original semantic: random suffix differentiates threads
+	if o.randomPrefix > 0 {
+		b := make([]byte, o.randomPrefix)
+		randASCIIBytes(b, r.rng)
+		r.randomSuffix = string(b)
+	}
+
+	// Set prefix once per source when not using multiple custom prefixes
+	// For multiple custom prefixes, prefix is set per-object for round-robin
+	if len(o.customPrefixes) <= 1 {
+		r.obj.setPrefix(o, 0, r.randomSuffix)
+	}
 	return &r, nil
 }
 
@@ -122,6 +136,12 @@ func (r *randomSrc) Object() *Object {
 	var nBuf [16]byte
 	randASCIIBytes(nBuf[:], r.rng)
 	r.obj.Size = r.o.getSize(r.rng)
+
+	// Set prefix based on counter for round-robin selection ONLY if multiple custom prefixes
+	// Use the per-thread random suffix (generated once) to preserve thread differentiation
+	if len(r.o.customPrefixes) > 1 {
+		r.obj.setPrefix(r.o, n-1, r.randomSuffix) // Use n-1 since Add returns new value
+	}
 	r.obj.setName(fmt.Sprintf("%d.%s.rnd", n, string(nBuf[:])))
 
 	// Reset scrambler

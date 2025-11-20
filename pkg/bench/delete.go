@@ -38,7 +38,7 @@ type Delete struct {
 	BatchSize     int
 	ListExisting  bool
 	ListFlat      bool
-	ListPrefix    string
+	ListPrefixes  []string
 }
 
 // Prepare will create an empty bucket or delete any content already there
@@ -59,30 +59,47 @@ func (d *Delete) Prepare(ctx context.Context) error {
 			return fmt.Errorf("bucket %s does not exist and --list-existing has been set", d.Bucket)
 		}
 
-		// list all objects
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		objectCh := cl.ListObjects(ctx, d.Bucket, minio.ListObjectsOptions{
-			Prefix:    d.ListPrefix,
-			Recursive: !d.ListFlat,
-		})
+		// If no prefixes specified, list all objects (empty prefix)
+		prefixes := d.ListPrefixes
+		if len(prefixes) == 0 {
+			prefixes = []string{""}
+		}
 
-		for object := range objectCh {
-			if object.Err != nil {
-				return object.Err
+		// List objects from all specified prefixes
+		for _, prefix := range prefixes {
+			ctx, cancel := context.WithCancel(ctx)
+			objectCh := cl.ListObjects(ctx, d.Bucket, minio.ListObjectsOptions{
+				Prefix:    prefix,
+				Recursive: !d.ListFlat,
+			})
+
+			for object := range objectCh {
+				if object.Err != nil {
+					cancel()
+					done()
+					return object.Err
+				}
+				obj := generator.Object{
+					Name: object.Key,
+					Size: object.Size,
+				}
+
+				d.objects = append(d.objects, obj)
+
+				// limit to ListingMaxObjects
+				if d.CreateObjects > 0 && len(d.objects) >= d.CreateObjects {
+					cancel()
+					break
+				}
 			}
-			obj := generator.Object{
-				Name: object.Key,
-				Size: object.Size,
-			}
+			cancel()
 
-			d.objects = append(d.objects, obj)
-
-			// limit to ListingMaxObjects
+			// Stop if we've reached the object limit
 			if d.CreateObjects > 0 && len(d.objects) >= d.CreateObjects {
 				break
 			}
 		}
+
 		if len(d.objects) == 0 {
 			return (fmt.Errorf("no objects found for bucket %s", d.Bucket))
 		}
