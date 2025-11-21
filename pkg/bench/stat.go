@@ -183,7 +183,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 					client, cldone := g.Client()
 					op := Operation{
 						OpType:   http.MethodPut,
-						Thread:   uint16(i),
+						Thread:   uint32(i),
 						Size:     obj.Size,
 						File:     obj.Name,
 						ObjPerOp: 1,
@@ -266,7 +266,7 @@ func (g *Stat) Start(ctx context.Context, wait chan struct{}) error {
 				client, cldone := g.Client()
 				op := Operation{
 					OpType:   "STAT",
-					Thread:   uint16(i),
+					Thread:   uint32(i),
 					Size:     0,
 					File:     obj.Name,
 					ObjPerOp: 1,

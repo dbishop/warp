@@ -149,7 +149,7 @@ func (d *Delete) Prepare(ctx context.Context) error {
 				client, cldone := d.Client()
 				op := Operation{
 					OpType:   http.MethodPut,
-					Thread:   uint16(i),
+					Thread:   uint32(i),
 					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
@@ -257,7 +257,7 @@ func (d *Delete) Start(ctx context.Context, wait chan struct{}) error {
 				client, cldone := d.Client()
 				op := Operation{
 					OpType:   http.MethodDelete,
-					Thread:   uint16(i),
+					Thread:   uint32(i),
 					Size:     0,
 					File:     "",
 					ObjPerOp: len(objs),
